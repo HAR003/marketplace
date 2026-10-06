@@ -1,17 +1,14 @@
 import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { AppModule, ObserveInstrument } from './app.module.js';
-import {ValidationPipe} from "@nestjs/common";
+import { configureApp } from './app.setup.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     instrument: ObserveInstrument,
   });
-  app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-      }),
-  );
-    await app.listen(3000);
+  configureApp(app);
+  const config = app.get(ConfigService);
+  await app.listen(Number(config.get<string>('PORT') ?? 3000));
 }
 await bootstrap();
