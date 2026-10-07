@@ -330,4 +330,18 @@ describe('Auth (e2e)', () => {
       await login(bob).expect(200);
     });
   });
+
+  describe('CORS', () => {
+    it('lets the frontend call the API with cookies', async () => {
+      const frontendUrl = config.getOrThrow<string>('FRONTEND_URL');
+      const res = await http()
+        .options('/auth/login')
+        .set('Origin', frontendUrl)
+        .set('Access-Control-Request-Method', 'POST')
+        .expect(204);
+
+      expect(res.get('Access-Control-Allow-Origin')).toBe(frontendUrl);
+      expect(res.get('Access-Control-Allow-Credentials')).toBe('true');
+    });
+  });
 });

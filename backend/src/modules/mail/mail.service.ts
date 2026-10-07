@@ -7,7 +7,7 @@ import { EMAIL_VERIFICATION_TTL_MINUTES } from '../token/token.service.js';
 export class MailService {
   private readonly transporter: Transporter;
   private readonly from: string;
-  private readonly appUrl: string;
+  private readonly frontendUrl: string;
 
   constructor(config: ConfigService) {
     const port = Number(config.getOrThrow<string>('MAIL_PORT'));
@@ -22,7 +22,7 @@ export class MailService {
         : undefined,
     });
     this.from = config.getOrThrow<string>('MAIL_FROM');
-    this.appUrl = config.getOrThrow<string>('APP_URL');
+    this.frontendUrl = config.getOrThrow<string>('FRONTEND_URL');
   }
 
   // One address can own several accounts, so the email names the account it verifies
@@ -31,7 +31,8 @@ export class MailService {
     username: string,
     token: string,
   ): Promise<void> {
-    const link = `${this.appUrl}/auth/verify-email?token=${encodeURIComponent(token)}`;
+    // The frontend's /verify-email page sends this token to GET /auth/verify-email
+    const link = `${this.frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
     const expiry = `The link expires in ${EMAIL_VERIFICATION_TTL_MINUTES} minutes. If you didn't create this account, you can ignore this email.`;
 
     await this.transporter.sendMail({
