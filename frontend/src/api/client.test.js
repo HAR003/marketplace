@@ -95,7 +95,7 @@ describe('apiRequest', () => {
     await expect(
       useAuthStore
         .getState()
-        .login({ username: 'alice', password: 'wrong password' }),
+        .login({ email: 'alice@example.com', password: 'wrong password' }),
     ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials' })
 
     expect(callsTo('/auth/refresh')).toHaveLength(0)

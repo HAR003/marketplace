@@ -1,12 +1,11 @@
 import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
-import { trim } from './transforms.js';
+import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { trimAndLowercase } from './transforms.js';
 
 export class LoginDto {
-  @Transform(trim)
-  @IsString()
-  @IsNotEmpty()
-  username: string;
+  @Transform(trimAndLowercase)
+  @IsEmail()
+  email: string;
 
   @IsString()
   @IsNotEmpty()

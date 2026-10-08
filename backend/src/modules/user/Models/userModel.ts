@@ -20,26 +20,28 @@ export default class User extends Model {
   })
   declare id: number;
 
+  // A display name only: not unique, and never used to log in
+  @Column({
+    type: DataType.STRING,
+    allowNull: false,
+  })
+  declare username: string;
+
+  // Identifies the account at login: one account per email address
   @Column({
     type: DataType.STRING,
     allowNull: false,
     unique: true,
   })
-  declare username: string;
-
-  // Several accounts may share one email address
-  @Column({
-    type: DataType.STRING,
-    allowNull: false,
-  })
   declare email: string;
 
-  // bcrypt hash, never the plaintext password
+  // bcrypt hash, never the plaintext password. Null for accounts that only
+  // sign in with Google.
   @Column({
     type: DataType.STRING,
-    allowNull: false,
+    allowNull: true,
   })
-  declare password: string;
+  declare password: string | null;
 
   @Column({
     type: DataType.INTEGER,
@@ -55,10 +57,19 @@ export default class User extends Model {
   })
   declare emailVerified: boolean;
 
-  // Keeps the password hash out of every serialized user (API responses included)
+  // Google's stable account id (the `sub` claim), set once the account signs in with Google
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+    unique: true,
+  })
+  declare googleId: string | null;
+
+  // Keeps the password hash and the Google id out of every serialized user (API responses included)
   toJSON() {
     const values = { ...this.get() };
     delete values.password;
+    delete values.googleId;
     return values;
   }
 }

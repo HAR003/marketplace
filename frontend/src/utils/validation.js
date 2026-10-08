@@ -34,9 +34,11 @@ export function validateRegistration({
   return errors
 }
 
-export function validateLogin({ username, password }) {
+export function validateLogin({ email, password }) {
   const errors = {}
-  if (!username.trim()) errors.username = 'Enter your username.'
+  if (!EMAIL_PATTERN.test(email.trim())) {
+    errors.email = 'Enter a valid email address.'
+  }
   if (!password) errors.password = 'Enter your password.'
   return errors
 }

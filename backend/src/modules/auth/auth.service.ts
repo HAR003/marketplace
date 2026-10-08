@@ -12,6 +12,10 @@ import { MailService } from '../mail/mail.service.js';
 import { TokenService } from '../token/token.service.js';
 import type User from '../user/Models/userModel.js';
 import { UserService } from '../user/user.service.js';
+import {
+  GoogleOAuthService,
+  type GoogleProfile,
+} from './google-oauth.service.js';
 
 export const BCRYPT_SALT_ROUNDS = 12;
 
@@ -26,6 +30,7 @@ export class AuthService {
     private readonly userService: UserService,
     private readonly tokenService: TokenService,
     private readonly mailService: MailService,
+    private readonly googleOAuthService: GoogleOAuthService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -38,9 +43,9 @@ export class AuthService {
         password: passwordHash,
       });
     } catch (error) {
-      // username is the only unique column; emails may repeat across accounts
+      // email is the only unique column a new password account can collide on
       if (error instanceof UniqueConstraintError) {
-        throw new ConflictException('Username already taken');
+        throw new ConflictException('Email already registered');
       }
       throw error;
     }
@@ -54,8 +59,12 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.userService.findByUsername(dto.username);
-    if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+    const user = await this.userService.findByEmail(dto.email);
+    // Accounts that only sign in with Google have no password to compare
+    if (
+      !user?.password ||
+      !(await bcrypt.compare(dto.password, user.password))
+    ) {
       throw new UnauthorizedException('Invalid credentials');
     }
     // Checked only after the password, so only the account owner learns this
@@ -63,6 +72,21 @@ export class AuthService {
       throw new UnauthorizedException('Email not verified');
     }
 
+    const tokens = await this.tokenService.issueAuthTokens(user.id);
+    return { ...tokens, user };
+  }
+
+  // Same tokens and same result shape as login(); only the way of finding the
+  // user differs
+  async googleLogin(code: string) {
+    const profile = await this.googleOAuthService.getProfile(code);
+    if (!profile.emailVerified) {
+      throw new UnauthorizedException('Google sign-in failed');
+    }
+
+    const user =
+      (await this.userService.findByGoogleId(profile.googleId)) ??
+      (await this.linkOrCreateGoogleUser(profile));
     const tokens = await this.tokenService.issueAuthTokens(user.id);
     return { ...tokens, user };
   }
@@ -91,12 +115,44 @@ export class AuthService {
   }
 
   // Same answer whether or not the account exists or is verified
-  async resendVerification(username: string) {
-    const user = await this.userService.findByUsername(username);
+  async resendVerification(email: string) {
+    const user = await this.userService.findByEmail(email);
     if (user && !user.emailVerified) {
       await this.sendVerificationEmail(user);
     }
     return { message: RESEND_VERIFICATION_MESSAGE };
+  }
+
+  // A Google account seen for the first time: link the account that has its
+  // email, or create a new one
+  private async linkOrCreateGoogleUser(profile: GoogleProfile) {
+    const user = await this.userService.findByEmail(profile.email);
+    if (!user) {
+      return this.userService.create({
+        // Usernames needn't be unique: john@gmail.com is simply "john"
+        username: profile.email.split('@')[0],
+        email: profile.email,
+        password: null,
+        googleId: profile.googleId,
+        emailVerified: true,
+      });
+    }
+
+    if (user.googleId) {
+      throw new ConflictException(
+        'This email is linked to another Google account',
+      );
+    }
+    // Google vouches only for addresses it manages (Gmail and Workspace
+    // domains). Any other address may have changed owner since the Google
+    // account verified it.
+    if (!profile.email.endsWith('@gmail.com') && !profile.hostedDomain) {
+      throw new ConflictException(
+        'An account with this email already exists. Log in with your password.',
+      );
+    }
+    await this.userService.linkGoogleAccount(user, profile.googleId);
+    return user;
   }
 
   // A failed send doesn't fail the request; the user can ask for a new email

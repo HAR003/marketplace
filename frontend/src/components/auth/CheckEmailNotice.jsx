@@ -3,7 +3,7 @@ import { MailIcon } from '../ui/icons.jsx'
 import ResendVerification from './ResendVerification.jsx'
 
 // Shown instead of the registration form once the account exists
-export default function CheckEmailNotice({ email, username }) {
+export default function CheckEmailNotice({ email }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4 rounded-xl bg-indigo-50 p-4">
@@ -21,7 +21,7 @@ export default function CheckEmailNotice({ email, username }) {
         <p className="mb-3 text-sm text-slate-500">
           Didn't get the email? Check your spam folder, or send a new link.
         </p>
-        <ResendVerification username={username} />
+        <ResendVerification email={email} />
       </div>
 
       <Link

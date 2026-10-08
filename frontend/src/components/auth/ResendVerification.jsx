@@ -6,11 +6,11 @@ import TextField from '../ui/TextField.jsx'
 
 const COOLDOWN_SECONDS = 60
 
-// Asks the backend for a new verification email, asking for the username when
-// none is passed in. The backend gives the same answer whether or not the
+// Asks the backend for a new verification email, asking for the email address
+// when none is passed in. The backend gives the same answer whether or not the
 // account exists, and the cooldown keeps the button from flooding the inbox.
-export default function ResendVerification({ username }) {
-  const [typedUsername, setTypedUsername] = useState('')
+export default function ResendVerification({ email }) {
+  const [typedEmail, setTypedEmail] = useState('')
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState(null)
   const [secondsLeft, setSecondsLeft] = useState(0)
@@ -21,7 +21,7 @@ export default function ResendVerification({ username }) {
     return () => clearTimeout(timer)
   }, [secondsLeft])
 
-  const target = (username ?? typedUsername).trim()
+  const target = (email ?? typedEmail).trim().toLowerCase()
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -42,13 +42,14 @@ export default function ResendVerification({ username }) {
 
   return (
     <form noValidate onSubmit={handleSubmit} className="space-y-3">
-      {username === undefined && (
+      {email === undefined && (
         <TextField
-          label="Username"
-          name="username"
-          autoComplete="username"
-          value={typedUsername}
-          onChange={(event) => setTypedUsername(event.target.value)}
+          label="Email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          value={typedEmail}
+          onChange={(event) => setTypedEmail(event.target.value)}
         />
       )}
       <Button

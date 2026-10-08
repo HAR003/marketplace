@@ -9,6 +9,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
 import { RESEND_VERIFICATION_MESSAGE } from '../src/modules/auth/auth.service.js';
+import {
+  GoogleOAuthService,
+  type GoogleProfile,
+} from '../src/modules/auth/google-oauth.service.js';
 import { MailService } from '../src/modules/mail/mail.service.js';
 import User from '../src/modules/user/Models/userModel.js';
 
@@ -21,22 +25,38 @@ class FakeMailService {
     return Promise.resolve();
   }
 
-  lastTokenFor(username: string): string {
-    const mail = this.sent.findLast((m) => m.username === username);
+  lastTokenFor(email: string): string {
+    const mail = this.sent.findLast((m) => m.to === email);
     if (!mail) {
-      throw new Error(`No verification email was sent to ${username}`);
+      throw new Error(`No verification email was sent to ${email}`);
     }
     return mail.token;
   }
 }
 
-// The suite runs against the dev database, so every run uses fresh usernames
+// Stands in for Google: whatever the code, it answers with the profile the test set
+class FakeGoogleOAuthService {
+  profile: GoogleProfile;
+
+  getProfile(): Promise<GoogleProfile> {
+    return Promise.resolve(this.profile);
+  }
+}
+
+// The suite runs against the dev database, so every run uses fresh emails
 // and afterAll deletes the users it created
 const run = Date.now().toString(36);
 const alice = `alice_${run}`;
+const aliceEmail = `alice_${run}@example.com`;
+// A second account with alice's username, which may repeat
+const aliceTwinEmail = `alice_twin_${run}@example.com`;
 const bob = `bob_${run}`;
-const nobody = `nobody_${run}`;
-const sharedEmail = `shared_${run}@example.com`;
+const bobEmail = `bob_${run}@example.com`;
+const nobodyEmail = `nobody_${run}@example.com`;
+// Google accounts: carol signs up with Google, dave first registers with a password
+const carolEmail = `carol_${run}@gmail.com`;
+const dave = `dave_${run}`;
+const daveEmail = `dave_${run}@gmail.com`;
 const password = 'correct horse battery';
 
 const setCookies = (res: request.Response): string[] =>
@@ -49,14 +69,15 @@ describe('Auth (e2e)', () => {
   let app: INestApplication | undefined;
   let config: ConfigService;
   const mail = new FakeMailService();
+  const google = new FakeGoogleOAuthService();
   const jwt = new JwtService();
 
   const http = () => request(app?.getHttpServer());
   const secret = (key: string) => config.getOrThrow<string>(key);
-  const register = (username: string, email = sharedEmail) =>
+  const register = (username: string, email: string) =>
     http().post('/auth/register').send({ username, email, password });
-  const login = (username: string, pw = password) =>
-    http().post('/auth/login').send({ username, password: pw });
+  const login = (email: string, pw = password) =>
+    http().post('/auth/login').send({ email, password: pw });
   const verifyEmail = (token?: string) =>
     http()
       .get('/auth/verify-email')
@@ -68,6 +89,8 @@ describe('Auth (e2e)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(MailService)
       .useValue(mail)
+      .overrideProvider(GoogleOAuthService)
+      .useValue(google)
       .compile();
     app = moduleRef.createNestApplication();
     configureApp(app);
@@ -77,29 +100,34 @@ describe('Auth (e2e)', () => {
 
   afterAll(async () => {
     if (app) {
-      await User.destroy({ where: { username: [alice, bob] } });
+      await User.destroy({
+        where: {
+          email: [aliceEmail, aliceTwinEmail, bobEmail, carolEmail, daveEmail],
+        },
+      });
       await app.close();
     }
   });
 
   describe('registration', () => {
     it('creates the account, emails a verification link and does not log the user in', async () => {
-      const res = await register(alice).expect(201);
+      const res = await register(alice, aliceEmail).expect(201);
 
       expect(res.body.user).toMatchObject({
         username: alice,
-        email: sharedEmail,
+        email: aliceEmail,
         emailVerified: false,
       });
       expect(res.body.user).not.toHaveProperty('password');
+      expect(res.body.user).not.toHaveProperty('googleId');
       expect(res.body).not.toHaveProperty('accessToken');
       expect(setCookies(res)).toEqual([]);
-      expect(mail.lastTokenFor(alice)).toEqual(expect.any(String));
+      expect(mail.lastTokenFor(aliceEmail)).toEqual(expect.any(String));
       aliceId = res.body.user.id;
     });
 
     it('stores the password as a bcrypt hash', async () => {
-      const row = await User.findOne({ where: { username: alice } });
+      const row = await User.findOne({ where: { email: aliceEmail } });
       const hash = row?.password ?? '';
 
       expect(hash).not.toBe(password);
@@ -108,14 +136,14 @@ describe('Auth (e2e)', () => {
       expect(await bcrypt.compare('wrong password', hash)).toBe(false);
     });
 
-    it('allows a second account with the same email address', async () => {
-      await register(bob).expect(201);
-      expect(await User.count({ where: { email: sharedEmail } })).toBe(2);
+    it('rejects a second account with the same email with 409', async () => {
+      const res = await register(bob, aliceEmail).expect(409);
+      expect(res.body.message).toBe('Email already registered');
     });
 
-    it('rejects a taken username with 409', async () => {
-      const res = await register(alice, `other_${run}@example.com`).expect(409);
-      expect(res.body.message).toBe('Username already taken');
+    it('allows a second account with the same username', async () => {
+      await register(alice, aliceTwinEmail).expect(201);
+      expect(await User.count({ where: { username: alice } })).toBe(2);
     });
 
     it('rejects invalid input with 400', async () => {
@@ -132,26 +160,26 @@ describe('Auth (e2e)', () => {
 
   describe('login before verification', () => {
     it('refuses an unverified user with 401 Email not verified', async () => {
-      const res = await login(alice).expect(401);
+      const res = await login(aliceEmail).expect(401);
       expect(res.body.message).toBe('Email not verified');
       expect(setCookies(res)).toEqual([]);
     });
 
     it('refuses a wrong password with 401 Invalid credentials', async () => {
-      const res = await login(alice, 'wrong password').expect(401);
+      const res = await login(aliceEmail, 'wrong password').expect(401);
       expect(res.body.message).toBe('Invalid credentials');
       expect(setCookies(res)).toEqual([]);
     });
 
-    it('gives an unknown username the same answer', async () => {
-      const res = await login(nobody).expect(401);
+    it('gives an unknown email the same answer', async () => {
+      const res = await login(nobodyEmail).expect(401);
       expect(res.body.message).toBe('Invalid credentials');
     });
   });
 
   describe('email verification', () => {
     it('rejects missing, malformed, tampered and wrongly signed tokens with 401', async () => {
-      const [header, , signature] = mail.lastTokenFor(alice).split('.');
+      const [header, , signature] = mail.lastTokenFor(aliceEmail).split('.');
       const forgedPayload = Buffer.from(
         JSON.stringify({ sub: aliceId, type: 'email_verification' }),
       ).toString('base64url');
@@ -183,7 +211,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('cannot be used as an access token or as a refresh token', async () => {
-      const token = mail.lastTokenFor(alice);
+      const token = mail.lastTokenFor(aliceEmail);
       await http()
         .get('/user/me')
         .set('Authorization', `Bearer ${token}`)
@@ -195,15 +223,15 @@ describe('Auth (e2e)', () => {
     });
 
     it('verifies the email with the emailed token', async () => {
-      const res = await verifyEmail(mail.lastTokenFor(alice)).expect(200);
+      const res = await verifyEmail(mail.lastTokenFor(aliceEmail)).expect(200);
 
       expect(res.body).toEqual({ message: 'Email verified' });
-      const row = await User.findOne({ where: { username: alice } });
+      const row = await User.findOne({ where: { email: aliceEmail } });
       expect(row?.emailVerified).toBe(true);
     });
 
     it('answers 200 again for an email that is already verified', async () => {
-      await verifyEmail(mail.lastTokenFor(alice)).expect(200);
+      await verifyEmail(mail.lastTokenFor(aliceEmail)).expect(200);
     });
   });
 
@@ -212,7 +240,7 @@ describe('Auth (e2e)', () => {
     let refreshToken: string;
 
     it('logs in a verified user and sends the refresh token only as an HttpOnly cookie', async () => {
-      const res = await login(alice).expect(200);
+      const res = await login(aliceEmail).expect(200);
 
       expect(res.body).toEqual({
         accessToken: expect.any(String),
@@ -280,7 +308,7 @@ describe('Auth (e2e)', () => {
 
     it('stores no token in the database', async () => {
       const row = await User.findOne({
-        where: { username: alice },
+        where: { email: aliceEmail },
         raw: true,
       });
       const storedValues = JSON.stringify(row);
@@ -313,21 +341,126 @@ describe('Auth (e2e)', () => {
 
   describe('resend-verification', () => {
     it('gives every account the same answer and only emails unverified ones', async () => {
+      await register(bob, bobEmail).expect(201);
       const sentBefore = mail.sent.length;
 
-      for (const username of [bob, alice, nobody]) {
+      for (const email of [bobEmail, aliceEmail, nobodyEmail]) {
         const res = await http()
           .post('/auth/resend-verification')
-          .send({ username })
+          .send({ email })
           .expect(200);
         expect(res.body).toEqual({ message: RESEND_VERIFICATION_MESSAGE });
       }
-      expect(mail.sent.slice(sentBefore).map((m) => m.username)).toEqual([bob]);
+      expect(mail.sent.slice(sentBefore).map((m) => m.to)).toEqual([bobEmail]);
     });
 
     it('sends a working token: the second account can verify and log in', async () => {
-      await verifyEmail(mail.lastTokenFor(bob)).expect(200);
-      await login(bob).expect(200);
+      await verifyEmail(mail.lastTokenFor(bobEmail)).expect(200);
+      await login(bobEmail).expect(200);
+    });
+  });
+
+  describe('Google sign-in', () => {
+    const googleLogin = (profile: GoogleProfile) => {
+      google.profile = profile;
+      return http().post('/auth/google').send({ code: 'code-from-google' });
+    };
+    const carol: GoogleProfile = {
+      googleId: `google_carol_${run}`,
+      email: carolEmail,
+      emailVerified: true,
+    };
+    let carolId: number;
+
+    it('creates a verified account without a password, named after the email, and starts a session', async () => {
+      const res = await googleLogin(carol).expect(200);
+
+      expect(res.body).toEqual({
+        accessToken: expect.any(String),
+        user: expect.objectContaining({
+          username: `carol_${run}`,
+          email: carolEmail,
+          emailVerified: true,
+        }),
+      });
+      expect(res.body.user).not.toHaveProperty('password');
+      expect(res.body.user).not.toHaveProperty('googleId');
+
+      const cookie = refreshSetCookie(res) ?? '';
+      expect(cookie).toMatch(/HttpOnly/);
+      expect(cookie).toMatch(/SameSite=Strict/);
+      expect(cookie).toMatch(/Path=\/auth/);
+      await http()
+        .get('/user/me')
+        .set('Authorization', `Bearer ${res.body.accessToken}`)
+        .expect(200);
+
+      const row = await User.findOne({ where: { email: carolEmail } });
+      expect(row?.googleId).toBe(carol.googleId);
+      expect(row?.password).toBeNull();
+      carolId = res.body.user.id;
+    });
+
+    it('signs the same Google account in again without creating another user', async () => {
+      const res = await googleLogin(carol).expect(200);
+
+      expect(res.body.user.id).toBe(carolId);
+      expect(await User.count({ where: { email: carolEmail } })).toBe(1);
+    });
+
+    it('refuses a password login for an account that only uses Google', async () => {
+      const res = await login(carolEmail).expect(401);
+      expect(res.body.message).toBe('Invalid credentials');
+    });
+
+    it('links a verified password account, which keeps its password', async () => {
+      // alice's example.com address stands in for a Google Workspace domain here
+      const res = await googleLogin({
+        googleId: `google_alice_${run}`,
+        email: aliceEmail,
+        emailVerified: true,
+        hostedDomain: 'example.com',
+      }).expect(200);
+
+      expect(res.body.user.id).toBe(aliceId);
+      const row = await User.findOne({ where: { email: aliceEmail } });
+      expect(row?.googleId).toBe(`google_alice_${run}`);
+      await login(aliceEmail).expect(200);
+    });
+
+    it('links an unverified account and removes the password it was registered with', async () => {
+      await register(dave, daveEmail).expect(201);
+
+      await googleLogin({
+        googleId: `google_dave_${run}`,
+        email: daveEmail,
+        emailVerified: true,
+      }).expect(200);
+
+      const row = await User.findOne({ where: { email: daveEmail } });
+      expect(row?.googleId).toBe(`google_dave_${run}`);
+      expect(row?.emailVerified).toBe(true);
+      expect(row?.password).toBeNull();
+      const res = await login(daveEmail).expect(401);
+      expect(res.body.message).toBe('Invalid credentials');
+    });
+
+    it('refuses to link an address Google does not manage with 409', async () => {
+      const res = await googleLogin({
+        googleId: `google_bob_${run}`,
+        email: bobEmail,
+        emailVerified: true,
+      }).expect(409);
+
+      expect(res.body.message).toBe(
+        'An account with this email already exists. Log in with your password.',
+      );
+      const row = await User.findOne({ where: { email: bobEmail } });
+      expect(row?.googleId).toBeNull();
+    });
+
+    it('rejects a request without a code with 400', async () => {
+      await http().post('/auth/google').send({}).expect(400);
     });
   });
 

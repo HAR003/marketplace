@@ -6,6 +6,7 @@ import { TokenModule } from '../token/token.module.js';
 import { UserModule } from '../user/user.module.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
+import { GoogleOAuthService } from './google-oauth.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
@@ -15,6 +16,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   controllers: [AuthController],
   providers: [
     AuthService,
+    GoogleOAuthService,
     JwtStrategy,
     JwtRefreshStrategy,
     { provide: APP_GUARD, useClass: JwtAuthGuard },

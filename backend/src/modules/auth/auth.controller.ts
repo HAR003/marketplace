@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
+import { GoogleLoginDto } from '../../dtos/google-login.dto.js';
 import { LoginDto } from '../../dtos/login.dto.js';
 import { RegisterDto } from '../../dtos/register.dto.js';
 import { ResendVerificationDto } from '../../dtos/resend-verification.dto.js';
@@ -22,6 +23,8 @@ import {
 import { Public } from './decorators/public.decorator.js';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard.js';
 import { REFRESH_COOKIE_NAME, refreshCookieOptions } from './refresh-cookie.js';
+
+type Session = Awaited<ReturnType<AuthService['login']>>;
 
 @Public()
 @Controller('auth')
@@ -46,15 +49,21 @@ export class AuthController {
     @Body() body: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { accessToken, refreshToken, refreshExpires, user } =
-      await this.authService.login(body);
-    // The refresh token only ever travels in this HttpOnly cookie
-    res.cookie(
-      REFRESH_COOKIE_NAME,
-      refreshToken,
-      refreshCookieOptions(this.secureCookies, refreshExpires),
+    return this.startSession(res, await this.authService.login(body));
+  }
+
+  // Called by the frontend's /auth/google/callback page (in the sign-in popup)
+  // with the code Google sent there
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  async google(
+    @Body() body: GoogleLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.startSession(
+      res,
+      await this.authService.googleLogin(body.code),
     );
-    return { accessToken, user };
   }
 
   // Issues a new access token only; the cookie keeps its original expiry
@@ -82,6 +91,20 @@ export class AuthController {
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   resendVerification(@Body() body: ResendVerificationDto) {
-    return this.authService.resendVerification(body.username);
+    return this.authService.resendVerification(body.email);
+  }
+
+  // Shared by both ways of logging in, so they set exactly the same cookie
+  private startSession(
+    res: Response,
+    { accessToken, refreshToken, refreshExpires, user }: Session,
+  ) {
+    // The refresh token only ever travels in this HttpOnly cookie
+    res.cookie(
+      REFRESH_COOKIE_NAME,
+      refreshToken,
+      refreshCookieOptions(this.secureCookies, refreshExpires),
+    );
+    return { accessToken, user };
   }
 }

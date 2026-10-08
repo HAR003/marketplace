@@ -1,10 +1,9 @@
 import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsString } from 'class-validator';
-import { trim } from './transforms.js';
+import { IsEmail } from 'class-validator';
+import { trimAndLowercase } from './transforms.js';
 
 export class ResendVerificationDto {
-  @Transform(trim)
-  @IsString()
-  @IsNotEmpty()
-  username: string;
+  @Transform(trimAndLowercase)
+  @IsEmail()
+  email: string;
 }

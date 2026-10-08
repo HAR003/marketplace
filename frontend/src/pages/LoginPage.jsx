@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { errorMessages } from '../api/client.js'
 import AuthLayout from '../components/auth/AuthLayout.jsx'
+import GoogleLoginButton from '../components/auth/GoogleLoginButton.jsx'
 import ResendVerification from '../components/auth/ResendVerification.jsx'
 import Alert from '../components/ui/Alert.jsx'
 import Button from '../components/ui/Button.jsx'
@@ -16,10 +17,10 @@ export default function LoginPage() {
   const { state } = useLocation()
   const login = useAuthStore((store) => store.login)
 
-  const [form, setForm] = useState({ username: '', password: '' })
+  const [form, setForm] = useState({ email: '', password: '' })
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
-  // After a failed login: { unverifiedUsername } or { messages }
+  // After a failed login: { unverifiedEmail } or { messages }
   const [failure, setFailure] = useState(null)
 
   const update = (field) => (event) => {
@@ -33,18 +34,18 @@ export default function LoginPage() {
     setErrors(found)
     if (Object.keys(found).length > 0) return
 
-    const username = form.username.trim()
+    const email = form.email.trim().toLowerCase()
     setSubmitting(true)
     setFailure(null)
     try {
-      await login({ username, password: form.password })
+      await login({ email, password: form.password })
       navigate('/', { replace: true })
     } catch (error) {
       setSubmitting(false)
       if (error.status === 401 && error.message === 'Email not verified') {
-        setFailure({ unverifiedUsername: username })
+        setFailure({ unverifiedEmail: email })
       } else if (error.status === 401) {
-        setFailure({ messages: ['Incorrect username or password.'] })
+        setFailure({ messages: ['Incorrect email or password.'] })
       } else {
         setFailure({ messages: errorMessages(error) })
       }
@@ -72,13 +73,14 @@ export default function LoginPage() {
 
         <form noValidate onSubmit={handleSubmit} className="space-y-5">
           <TextField
-            label="Username"
-            name="username"
-            autoComplete="username"
+            label="Email"
+            name="email"
+            type="email"
+            autoComplete="email"
             autoFocus
-            value={form.username}
-            onChange={update('username')}
-            error={errors.username}
+            value={form.email}
+            onChange={update('email')}
+            error={errors.email}
           />
           <PasswordField
             label="Password"
@@ -92,6 +94,8 @@ export default function LoginPage() {
             Log in
           </Button>
         </form>
+
+        <GoogleLoginButton />
       </div>
     </AuthLayout>
   )
@@ -100,12 +104,12 @@ export default function LoginPage() {
 // The message above the form: the last login attempt's problem if there is
 // one, otherwise the result of opening the verification link
 function LoginNotice({ state, failure }) {
-  if (failure?.unverifiedUsername) {
+  if (failure?.unverifiedEmail) {
     return (
       <Alert type="warning" title="Verify your email first">
         <p>Open the link we emailed you when you registered, then log in again.</p>
         <div className="mt-3">
-          <ResendVerification username={failure.unverifiedUsername} />
+          <ResendVerification email={failure.unverifiedEmail} />
         </div>
       </Alert>
     )
@@ -127,7 +131,7 @@ function LoginNotice({ state, failure }) {
   if (state?.verificationFailed) {
     return (
       <Alert type="error" title="This link is invalid or has expired">
-        <p>Enter your username and we'll send you a new verification link.</p>
+        <p>Enter your email and we'll send you a new verification link.</p>
         <div className="mt-3">
           <ResendVerification />
         </div>

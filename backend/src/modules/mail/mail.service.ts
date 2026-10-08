@@ -25,7 +25,6 @@ export class MailService {
     this.frontendUrl = config.getOrThrow<string>('FRONTEND_URL');
   }
 
-  // One address can own several accounts, so the email names the account it verifies
   async sendVerificationEmail(
     to: string,
     username: string,
